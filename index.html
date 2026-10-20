@@ -75,11 +75,21 @@ textarea{min-height:96px;resize:vertical}
 .mk.start{background:#1b1f1d;color:#fff;width:30px;height:30px}
 .mk.pend{background:#6b726e;color:#fff}
 #startAddr{display:none}
+details summary{cursor:pointer;font-weight:600;color:var(--accent);padding:4px 0;list-style:none}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:'▸ ';}
+details[open] summary::before{content:'▾ ';}
+details input{margin-top:8px;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+a{color:var(--accent)}
+.keytag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;margin-right:6px}
+.keytag.own{background:var(--accent-soft);color:var(--accent)}
+.keytag.def{background:#fdf0dc;color:var(--warn)}
+body.nokey #map,body.nokey .wrap>.card:not(#keyCard),body.nokey .bar,body.nokey #modeHint{display:none}
+body.nokey{padding-bottom:24px}
+body.nokey #keyCard{margin-top:24px}
+.welcome{display:none}
+body.nokey .welcome{display:block}
 </style>
-<script>
-window._AMapSecurityConfig = { securityJsCode: '08a9d7aa98b4ae4141ca55e0ad0f14b4' };
-</script>
-<script src="https://webapi.amap.com/maps?v=2.0&key=f89416b05ea87bdaa258d2af7359e34d&plugin=AMap.Geocoder,AMap.PlaceSearch,AMap.Driving,AMap.Walking,AMap.Geolocation"></script>
 </head>
 <body>
 <div id="map"></div>
@@ -124,7 +134,26 @@ window._AMapSecurityConfig = { securityJsCode: '08a9d7aa98b4ae4141ca55e0ad0f14b4
     <div id="summary"></div>
     <ul class="list" id="list"></ul>
   </div>
-  <p class="small" style="text-align:center;margin:14px 0 0">驾车：一键把全部途经点交给高德；步行：高德不支持途经点，按顺序逐站导航。</p>
+  <p class="small" id="modeHint" style="text-align:center;margin:14px 0 0">驾车：一键把全部途经点交给高德；步行：高德不支持途经点，按顺序逐站导航。</p>
+
+  <div class="card" id="keyCard">
+    <div class="welcome">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px">多点导航</div>
+      <p style="margin:0 0 10px">粘贴多个地址，自动算出最优顺序，一键跳转高德导航。首次使用需要填一个你自己的高德 Key（免费），填一次之后一直保存在这台设备上。</p>
+    </div>
+    <h2>高德 Key</h2>
+    <div class="small" id="keyStatus"></div>
+    <details id="keyDetails" style="margin-top:8px">
+      <summary id="keySummary">更换 Key</summary>
+      <p class="small" style="margin:6px 0 0">免费申请：打开 <a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener">高德开放平台控制台</a>，完成个人认证 → 创建应用 → 添加 Key，服务平台选「Web端（JS API）」，把 Key 和安全密钥填到下面。只保存在你这台设备的浏览器里，不会上传。</p>
+      <input type="text" id="ownKey" placeholder="Key（32 位）" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <input type="text" id="ownSec" placeholder="安全密钥（32 位）" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <button class="btn ghost" id="keyReset">清除</button>
+        <button class="btn primary" id="keySave">保存并刷新</button>
+      </div>
+    </details>
+  </div>
 </div>
 
 <div class="bar"><div class="wrap">
@@ -135,7 +164,7 @@ window._AMapSecurityConfig = { securityJsCode: '08a9d7aa98b4ae4141ca55e0ad0f14b4
 <div class="toast" id="toast"><span id="toastMsg"></span><a href="#" id="toastAct"></a></div>
 
 <script>
-(function(){
+function startApp(){
 'use strict';
 
 /* ---------- 存储（失败也不影响使用） ---------- */
@@ -179,7 +208,7 @@ function hideToast(){$('#toast').classList.remove('show')}
 function progress(f){const p=$('#prog');if(f==null){p.style.display='none';return}p.style.display='block';p.firstElementChild.style.width=(f*100)+'%'}
 
 if(!window.AMap){
-  document.body.insertAdjacentHTML('afterbegin','<div style="padding:16px;color:#c2410c">高德地图脚本加载失败，请检查网络或 Key 配置。</div>');
+  document.body.insertAdjacentHTML('afterbegin','<div style="padding:16px;color:#c2410c">高德地图加载失败：请检查网络，或在页面底部「高德 Key」里检查或更换 Key。</div>');
   return;
 }
 
@@ -225,6 +254,7 @@ function geocode(text){
     const city=S.city.trim();
     const gc=new AMap.Geocoder({city:city||''});
     gc.getLocation(text,(st,r)=>{
+      if(st==='error')reportErr(r);
       const g=(st==='complete'&&r.geocodes&&r.geocodes.length)?r.geocodes[0]:null;
       if(g&&!COARSE.includes(g.level)){
         return res({name:text,addr:g.formattedAddress,lng:g.location.lng,lat:g.location.lat,coarse:false});
@@ -232,6 +262,7 @@ function geocode(text){
       // 不够精确时用 POI 搜索再试一次（对店名、景点名更准）
       const ps=new AMap.PlaceSearch({city:city||'全国',citylimit:!!city,pageSize:1,pageIndex:1,extensions:'base'});
       ps.search(text,(s2,r2)=>{
+        if(s2==='error')reportErr(r2);
         const p=(s2==='complete'&&r2.poiList&&r2.poiList.pois&&r2.poiList.pois.length)?r2.poiList.pois[0]:null;
         if(p&&p.location){
           return res({name:p.name||text,addr:[p.cityname,p.adname,p.address].filter(x=>x&&typeof x==='string').join(''),
@@ -253,6 +284,7 @@ function route(a,b,mode,withPath){
     let done=false;const t=setTimeout(()=>{if(!done){done=true;res(null)}},12000);
     svc.search(new AMap.LngLat(a.lng,a.lat),new AMap.LngLat(b.lng,b.lat),(st,r)=>{
       if(done)return;done=true;clearTimeout(t);
+      if(st==='error')reportErr(r);
       if(st==='complete'&&r.routes&&r.routes.length){
         const rt=r.routes[0];let path=null;
         if(withPath){path=[];(rt.steps||[]).forEach(s=>(s.path||[]).forEach(p=>path.push([p.lng,p.lat])))}
@@ -309,6 +341,7 @@ function solve(C,stopIdx,s,r){
 }
 
 /* ---------- 核心流程 ---------- */
+function reportErr(r){const info=typeof r==='string'?r:(r&&(r.info||r.message))||'';if(window.__keyProblem)window.__keyProblem(info)}
 const byId=id=>S.stops.find(s=>s.id===id);
 let busy=false;
 function setBusy(b,label){busy=b;$('#calcBtn').disabled=b;$('#addBtn').disabled=b;if(label)$('#calcBtn').textContent=label;render()}
@@ -526,6 +559,68 @@ $('#list').onclick=e=>{
 
 render();
 S.order?drawRoute():drawMap();
+}
+</script>
+<script>
+/* ---------- Key 配置与加载高德脚本 ---------- */
+(function(){
+const LS_KEY='mnav.key.v1';
+let c=null;try{c=JSON.parse(localStorage.getItem(LS_KEY))}catch(e){}
+const own=!!(c&&c.key&&c.sec);
+const mask=k=>k.slice(0,4)+'…'+k.slice(-4);
+const st=document.getElementById('keyStatus');
+if(own){
+  st.innerHTML='<span class="keytag own">已保存</span>'+mask(c.key)+' · 一直使用这个 Key，需要时可更换';
+  document.getElementById('ownKey').value=c.key;document.getElementById('ownSec').value=c.sec;
+}else{
+  document.body.classList.add('nokey');
+  st.innerHTML='<span class="keytag def">未设置</span>填好后点“保存并开始使用”';
+  document.getElementById('keyDetails').open=true;
+  document.getElementById('keySummary').textContent='填写 Key';
+  document.getElementById('keySave').textContent='保存并开始使用';
+  document.getElementById('keyReset').style.display='none';
+}
+const ok=v=>/^[0-9a-fA-F]{32}$/.test(v);
+document.getElementById('keySave').onclick=function(){
+  const k=document.getElementById('ownKey').value.trim(),s=document.getElementById('ownSec').value.trim();
+  if(!ok(k)||!ok(s)){alertBox('Key 和安全密钥都应是 32 位的字母数字，请检查是否复制完整');return}
+  if(k===s){alertBox('Key 和安全密钥填成一样的了，请分别复制');return}
+  try{localStorage.setItem(LS_KEY,JSON.stringify({key:k,sec:s}))}catch(e){alertBox('浏览器不允许保存（可能是无痕模式）');return}
+  location.reload();
+};
+document.getElementById('keyReset').onclick=function(){
+  if(!confirm('清除已保存的 Key？清除后需要重新填写才能使用。'))return;
+  try{localStorage.removeItem(LS_KEY)}catch(e){}
+  location.reload();
+};
+function alertBox(msg){
+  const t=document.getElementById('toast');document.getElementById('toastMsg').textContent=msg;
+  document.getElementById('toastAct').style.display='none';t.classList.add('show');
+  clearTimeout(alertBox.t);alertBox.t=setTimeout(()=>t.classList.remove('show'),4000);
+}
+// 供主程序调用：发现额度用完/Key 无效时提示换 Key
+let lastWarn=0;
+window.__keyProblem=function(info){
+  info=String(info||'');
+  if(!/OVER_LIMIT|INVALID|USERKEY|INSUFFICIENT|SECURITY|NO_PERMISSION|DAILY_QUERY|ACCESS_TOO_FREQUENT|CUQPS/i.test(info))return false;
+  if(Date.now()-lastWarn<8000)return true;lastWarn=Date.now();
+  const freq=/FREQUENT|QPS/i.test(info);
+  const msg=freq?'请求太快被高德限流了，稍等几秒再试':(/OVER_LIMIT|DAILY_QUERY|INSUFFICIENT/i.test(info)?'这个 Key 今天的额度用完了（'+info+'），明天恢复，或更换 Key':'Key 不可用（'+info+'），请检查 Key、安全密钥和服务平台是否为「Web端（JS API）」');
+  const t=document.getElementById('toast');document.getElementById('toastMsg').textContent=msg;
+  const a=document.getElementById('toastAct');
+  if(!freq){a.textContent='去更换';a.style.display='';a.onclick=e=>{e.preventDefault();t.classList.remove('show');
+    const d=document.getElementById('keyDetails');d.open=true;d.scrollIntoView({behavior:'smooth',block:'center'})}}
+  else a.style.display='none';
+  t.classList.add('show');clearTimeout(alertBox.t);alertBox.t=setTimeout(()=>t.classList.remove('show'),7000);
+  return true;
+};
+if(!own)return; // 没有 Key 就不加载地图
+window._AMapSecurityConfig={securityJsCode:c.sec};
+const sc=document.createElement('script');
+sc.src='https://webapi.amap.com/maps?v=2.0&key='+encodeURIComponent(c.key)+'&plugin=AMap.Geocoder,AMap.PlaceSearch,AMap.Driving,AMap.Walking,AMap.Geolocation';
+let started=false;const go=()=>{if(!started){started=true;startApp()}};
+sc.onload=go;sc.onerror=go;
+document.body.appendChild(sc);
 })();
 </script>
 </body>
