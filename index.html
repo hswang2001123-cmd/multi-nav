@@ -84,6 +84,16 @@ a{color:var(--accent)}
 .keytag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;margin-right:6px}
 .keytag.own{background:var(--accent-soft);color:var(--accent)}
 .keytag.def{background:#fdf0dc;color:var(--warn)}
+/* 跳转失败时的底部面板 */
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:none;align-items:flex-end;justify-content:center}
+.sheet.show{display:flex}
+.sheet-card{background:var(--card);width:100%;max-width:640px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
+.sheet-card .btn{display:block;text-align:center;text-decoration:none;padding:12px 0}
+.sheet-title{font-size:17px;font-weight:700}
+.banner{background:#fdf0dc;color:#7c4a03;padding:10px 14px;font-size:13.5px;line-height:1.45}
+.raw{font-size:12px;color:var(--muted);margin-top:2px;word-break:break-all}
+.body.editable{cursor:pointer}
+.edit-ico{font-size:12px;color:var(--muted);margin-left:4px;font-weight:400}
 body.nokey #map,body.nokey .wrap>.card:not(#keyCard),body.nokey .bar,body.nokey #modeHint{display:none}
 body.nokey{padding-bottom:24px}
 body.nokey #keyCard{margin-top:24px}
@@ -92,6 +102,7 @@ body.nokey .welcome{display:block}
 </style>
 </head>
 <body>
+<div class="banner" id="inAppBanner" style="display:none">当前在微信等 App 的内置浏览器里，它会拦截跳转高德。请点右上角「···」→「在浏览器中打开」后使用；“添加到主屏幕”也要在 Safari / 系统浏览器里操作。</div>
 <div id="map"></div>
 
 <div class="wrap">
@@ -161,6 +172,14 @@ body.nokey .welcome{display:block}
   <button class="btn primary" id="navBtn" disabled>开始导航</button>
 </div></div>
 
+<div class="sheet" id="sheet"><div class="sheet-card">
+  <div class="sheet-title" id="sheetTitle">没能打开高德地图？</div>
+  <div class="small" id="sheetMsg"></div>
+  <a class="btn primary" id="sheetLink" href="#">再试一次：打开高德（带全部途经点）</a>
+  <a class="btn" id="sheetLink2" href="#" style="display:none">换一种方式打开</a>
+  <button class="btn" id="sheetLeg">改为逐站导航：去第 1 站</button>
+  <button class="btn ghost" id="sheetClose">关闭</button>
+</div></div>
 <div class="toast" id="toast"><span id="toastMsg"></span><a href="#" id="toastAct"></a></div>
 
 <script>
@@ -248,6 +267,38 @@ function locate(){
     });
   });
 }
+/* 从混杂文本中提取地址：去掉电话、姓名、标签、备注等 */
+const ADDR_KW=/(省|自治区|特别行政区|市|区|县|旗|镇|乡|街道|村|社区|路|街|道|巷|弄|胡同|大道|号|栋|幢|座|单元|室|楼|层|小区|花园|公寓|大厦|广场|中心|商场|酒店|宾馆|学校|大学|学院|中学|小学|幼儿园|医院|公园|车站|站|机场|园|苑|府|城|湾|港|桥|庄|屯|馆|店|厂|超市|银行|码头|基地|工业|科技|大楼|写字楼|门|所|公司|集团|研究院|厅|局|处|中学|食堂|宿舍|驿站|菜鸟|丰巢)/;
+const NOISE_KW=/^(先生|女士|小姐|老师|师傅|收|寄|送|到付|已付|急|加急|备注|电话|手机|微信|快递|外卖|订单|单号|件|箱|袋|份|个|元|块)$/;
+function extractAddress(line){
+  let t=String(line).replace(/[\u200b\ufeff]/g,'');
+  // 电话、手机号、座机、订单号等长数字
+  t=t.replace(/(\+?86[-\s]?)?1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}/g,' ')
+     .replace(/\(?0\d{2,3}\)?[-\s]?\d{7,8}(-\d{1,4})?/g,' ')
+     .replace(/\d{11,}/g,' ');
+  // 常见字段标签（含后面的冒号）
+  t=t.replace(/(收件人|收货人|联系人|姓名|名字|电话|手机号码|手机号|手机|联系电话|联系方式|微信号?|备注|留言|时间|送达时间|配送时间|订单号|单号|收货地址|详细地址|所在地区|所在地|地址)\s*[:：]/g,' ');
+  // 尾部常见备注：括号/【】中的“送/放/电话/备注…”说明
+  t=t.replace(/[（(【\[][^）)】\]]*(送|放|电话|备注|联系|请|勿|时间|签收|代收)[^）)】\]]*[）)】\]]/g,' ');
+  const toks=t.split(/[\s,，;；|｜\/\t:：、]+/).map(x=>x.trim()).filter(Boolean);
+  const isAddr=x=>!NOISE_KW.test(x)&&ADDR_KW.test(x)&&/[\u4e00-\u9fa5]/.test(x)&&!(x.length<=3&&/^[\u4e00-\u9fa5]{1,3}$/.test(x)&&/(先生|女士|小姐)$/.test(x));
+  const isTail=x=>/^[0-9A-Za-z#\-－—]+(号|栋|幢|座|单元|室|楼|层|号楼|门)?$/.test(x)||/^[0-9A-Za-z#\-]*[\u4e00-\u9fa5]{0,2}(号|栋|幢|座|单元|室|楼|层)$/.test(x);
+  let best='',i=0;
+  while(i<toks.length){
+    if(isAddr(toks[i])){
+      let j=i,run=[];
+      while(j<toks.length&&(isAddr(toks[j])||(run.length&&isTail(toks[j])))){run.push(toks[j]);j++}
+      if(run.length>1&&/^\d+号$/.test(run[0]))run.shift(); // 开头的“1号”多半是序号
+      const cand=run.join('');
+      if(cand.length>best.length)best=cand;
+      i=j;
+    }else i++;
+  }
+  if(!best){ // 没有明显地址关键字：取最长的一段中文（店名、地名等）
+    toks.forEach(x=>{if(/[\u4e00-\u9fa5]/.test(x)&&!NOISE_KW.test(x)&&x.length>best.length)best=x});
+  }
+  return best||String(line).trim();
+}
 const COARSE=['国家','省','市','区县','开发区','乡镇','村庄','热点商圈','未知'];
 function geocode(text){
   return new Promise(res=>{
@@ -268,8 +319,16 @@ function geocode(text){
           return res({name:p.name||text,addr:[p.cityname,p.adname,p.address].filter(x=>x&&typeof x==='string').join(''),
             lng:p.location.lng,lat:p.location.lat,coarse:false});
         }
-        if(g)return res({name:text,addr:g.formattedAddress+'（仅定位到'+g.level+'）',lng:g.location.lng,lat:g.location.lat,coarse:true});
-        res(null);
+        // 再用输入提示试一次（对模糊、口语化的地名更宽容）
+        const ac=new AMap.AutoComplete({city:city||'全国',citylimit:!!city});
+        ac.search(text,(s3,r3)=>{
+          if(s3==='error')reportErr(r3);
+          const tip=(s3==='complete'&&r3.tips)?r3.tips.find(x=>x.location&&x.location.lng):null;
+          if(tip)return res({name:tip.name||text,addr:[tip.district,typeof tip.address==='string'?tip.address:''].filter(Boolean).join(''),
+            lng:tip.location.lng,lat:tip.location.lat,coarse:false});
+          if(g)return res({name:text,addr:g.formattedAddress+'（仅定位到'+g.level+'）',lng:g.location.lng,lat:g.location.lat,coarse:true});
+          res(null);
+        });
       });
     });
   });
@@ -413,8 +472,9 @@ async function addFromInput(){
   setBusy(true);progress(0);
   const failed=[];
   for(let i=0;i<todo.length;i++){
-    const g=await geocode(todo[i]);
-    if(g)S.stops.push(Object.assign({id:uid(),raw:todo[i]},g));else failed.push(todo[i]);
+    const q=extractAddress(todo[i]);
+    const g=await geocode(q);
+    if(g)S.stops.push(Object.assign({id:uid(),raw:todo[i],query:q},g));else failed.push(todo[i]);
     progress((i+1)/todo.length);await sleep(150);
   }
   progress(null);
@@ -464,14 +524,32 @@ async function reoptimizeCached(){
     persist();render();drawRoute();
   }finally{setBusy(false,'重新计算')}
 }
+// 修改某个地址：重新识别并定位，已有路线则重新排序
+async function editStop(id){
+  const s=byId(id);if(!s)return;
+  const v=prompt('修改地址（可以写得更具体，比如加上城市、区、门牌号）',s.query||s.raw||s.name);
+  if(v==null)return;const text=v.trim();if(!text||text===(s.query||s.raw))return;
+  setBusy(true);
+  const q=extractAddress(text),g=await geocode(q);
+  setBusy(false);
+  if(!g){toast('没找到这个地址，换个写法试试');return}
+  Object.assign(s,g,{raw:text,query:q});
+  persist();render();
+  if(S.order)await reoptimizeCached();else drawMap();
+  toast('已更新为「'+s.name+'」');
+}
 function undo(){if(!lastDeleted)return;Object.assign(S,lastDeleted);lastDeleted=null;persist();render();S.order?drawRoute():drawMap()}
 
 /* ---------- 导航跳转 ---------- */
 const UA=navigator.userAgent,isIOS=/iPhone|iPad|iPod/i.test(UA)||(/Macintosh/.test(UA)&&'ontouchend' in document),isAndroid=/Android/i.test(UA);
+const inApp=/MicroMessenger|QQ\/|DingTalk|Weibo|AlipayClient|Lark|Feishu|wxwork|ToutiaoMicroApp|aweme|XiaoHongShu/i.test(UA);
+const androidIntentOK=isAndroid&&/Chrome\/\d/.test(UA)&&!/HuaweiBrowser|HarmonyOS|MiuiBrowser|XiaoMi\/|HeyTapBrowser|OppoBrowser|VivoBrowser|UCBrowser|Quark|baiduboxapp|SogouMobileBrowser|MQQBrowser|360/i.test(UA);
+if(inApp)$('#inAppBanner').style.display='block';
+function openUrl(url){const a=document.createElement('a');a.href=url;a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),200)}
 function navOne(p){
   const url='https://uri.amap.com/navigation?to='+p.lng+','+p.lat+','+encodeURIComponent(p.name)+
     '&mode='+(S.mode==='car'?'car':'walk')+'&policy=1&src=mnav&coordinate=gaode&callnative=1';
-  location.href=url;
+  openUrl(url);
 }
 function navAll(){
   const stops=(S.order||[]).map(byId).filter(Boolean);if(!stops.length)return;
@@ -490,11 +568,30 @@ function navAll(){
       'vialats='+vias.map(v=>v.lat).join('|'),
       'vianames='+vias.map(v=>encodeURIComponent(v.name)).join('|'));
   }
-  const url=(isIOS?'iosamap://path?sourceApplication=mnav&':'amapuri://route/plan/?sourceApplication=mnav&')+q.join('&');
-  const t0=Date.now();
-  location.href=url;
-  setTimeout(()=>{if(!document.hidden&&Date.now()-t0<2600)toast('没有打开高德地图？可点各站右侧的“导航”逐站前往',null,null,5000)},2000);
+  const qs='sourceApplication=mnav&'+q.join('&');
+  const urls=isIOS?['iosamap://path?'+qs]
+    :(androidIntentOK
+      ?['intent://route/plan/?'+qs+'#Intent;scheme=amapuri;package=com.autonavi.minimap;end','amapuri://route/plan/?'+qs]
+      :['amapuri://route/plan/?'+qs,'intent://route/plan/?'+qs+'#Intent;scheme=amapuri;package=com.autonavi.minimap;end']);
+  if(inApp){showSheet(urls,stops[0],'当前在微信等 App 的内置浏览器里，它会拦截跳转高德 App。请点右上角「···」→「在浏览器中打开」，再点一键导航。也可以先逐站导航。');return}
+  let left=false;const mark=()=>{left=true};
+  document.addEventListener('visibilitychange',mark,{once:true});window.addEventListener('pagehide',mark,{once:true});window.addEventListener('blur',mark,{once:true});
+  openUrl(urls[0]);
+  setTimeout(()=>{if(!left&&!document.hidden)showSheet(urls,stops[0],'可能是浏览器拦截了跳转，或手机上没装高德地图。可以直接点下面的按钮再试（直接点按钮成功率更高），或者改为逐站导航。')},2200);
 }
+function showSheet(urls,first,msg){
+  $('#sheetMsg').textContent=msg;
+  $('#sheetLink').href=urls[0];
+  const l2=$('#sheetLink2');if(urls[1]){l2.href=urls[1];l2.style.display='block'}else l2.style.display='none';
+  $('#sheetLeg').textContent='改为逐站导航：去「'+first.name+'」';
+  $('#sheetLeg').onclick=()=>{hideSheet();navOne(first)};
+  $('#sheet').classList.add('show');
+}
+function hideSheet(){$('#sheet').classList.remove('show')}
+$('#sheetClose').onclick=hideSheet;
+$('#sheet').onclick=e=>{if(e.target.id==='sheet')hideSheet()};
+$('#sheetLink').addEventListener('click',()=>setTimeout(hideSheet,300));
+$('#sheetLink2').addEventListener('click',()=>setTimeout(hideSheet,300));
 
 /* ---------- 渲染 ---------- */
 function render(){
@@ -528,7 +625,8 @@ function render(){
 function li(s,n,l,first){
   const bad=s.coarse;
   return '<li class="item" data-id="'+s.id+'"><div class="num'+(bad?' bad':'')+'">'+n+'</div>'+
-    '<div class="body"><div class="name">'+esc(s.name)+'</div><div class="addr">'+esc(s.addr||'')+'</div>'+
+    '<div class="body editable" data-act="edit"><div class="name">'+esc(s.name)+'<span class="edit-ico">✎</span></div><div class="addr">'+esc(s.addr||'')+'</div>'+
+    (s.raw&&s.raw!==s.name&&s.raw!==s.query?'<div class="raw">原文：'+esc(s.raw.length>60?s.raw.slice(0,60)+'…':s.raw)+'</div>':'')+
     (l?'<div class="leg">'+(first?'从出发点 ':'距上一站 ')+fmtD(l.d)+' · '+fmtT(l.t)+(l.est?'（估）':'')+'</div>':'')+
     (bad?'<div class="addr" style="color:var(--warn)">位置可能不准，建议删掉后写得更具体些</div>':'')+
     '</div><div class="acts">'+
@@ -550,9 +648,10 @@ $('#navBtn').onclick=navAll;
 $('#clearBtn').onclick=()=>{if(!S.stops.length)return;lastDeleted=JSON.parse(JSON.stringify(S));
   S.stops=[];invalidate();S.origin=null;S.cur=null;persist();render();drawMap();toast('已清空','撤销',undo,5000)};
 $('#list').onclick=e=>{
-  const b=e.target.closest('button[data-act]');if(!b||busy)return;
+  const b=e.target.closest('[data-act]');if(!b||busy)return;
   const id=b.closest('.item').dataset.id,act=b.dataset.act;
   if(act==='del')removeStop(id,false);
+  else if(act==='edit')editStop(id);
   else if(act==='arrive')removeStop(id,true);
   else if(act==='nav'){const s=byId(id);if(s)navOne(s)}
 };
@@ -617,7 +716,7 @@ window.__keyProblem=function(info){
 if(!own)return; // 没有 Key 就不加载地图
 window._AMapSecurityConfig={securityJsCode:c.sec};
 const sc=document.createElement('script');
-sc.src='https://webapi.amap.com/maps?v=2.0&key='+encodeURIComponent(c.key)+'&plugin=AMap.Geocoder,AMap.PlaceSearch,AMap.Driving,AMap.Walking,AMap.Geolocation';
+sc.src='https://webapi.amap.com/maps?v=2.0&key='+encodeURIComponent(c.key)+'&plugin=AMap.Geocoder,AMap.PlaceSearch,AMap.AutoComplete,AMap.Driving,AMap.Walking,AMap.Geolocation';
 let started=false;const go=()=>{if(!started){started=true;startApp()}};
 sc.onload=go;sc.onerror=go;
 document.body.appendChild(sc);
