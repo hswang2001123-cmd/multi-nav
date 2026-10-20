@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="多点导航">
+<meta name="theme-color" content="#0f766e">
+<title>多点导航</title>
+<style>
+:root{
+  --bg:#f3f4f1;--card:#ffffff;--ink:#1b1f1d;--muted:#6b726e;--line:#e2e5df;
+  --accent:#0f766e;--accent-ink:#ffffff;--accent-soft:#e3f2ef;
+  --danger:#c2410c;--ok:#15803d;--warn:#b45309;
+  --r:14px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#111412;--card:#1b1f1d;--ink:#e7ebe8;--muted:#98a19c;--line:#2b312e;
+  --accent:#2dd4bf;--accent-ink:#04201b;--accent-soft:#163430;--danger:#fb923c;--ok:#4ade80;--warn:#fbbf24}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+body{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
+#map{height:36vh;min-height:220px;width:100%;background:var(--line)}
+.wrap{max-width:640px;margin:0 auto;padding:0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-top:12px}
+h2{font-size:13px;font-weight:600;color:var(--muted);margin:0 0 10px;letter-spacing:.02em}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row + .row{margin-top:10px}
+.seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;flex:1}
+.seg button{flex:1;border:0;background:transparent;color:var(--muted);padding:8px 0;border-radius:8px;font-size:14px;font-weight:600}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+label.chk{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--ink)}
+input[type=text],textarea{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  border-radius:10px;padding:10px 12px;font:inherit;outline:none}
+input[type=text]:focus,textarea:focus{border-color:var(--accent)}
+textarea{min-height:96px;resize:vertical}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:9px 14px;font:inherit;font-weight:600}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.45}
+.small{font-size:12.5px;color:var(--muted)}
+.list{list-style:none;margin:0;padding:0}
+.item{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.num{flex:none;width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+  font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.num.bad{background:#fde7dc;color:var(--danger)}
+.body{flex:1;min-width:0}
+.name{font-weight:600;word-break:break-all}
+.addr{font-size:12.5px;color:var(--muted);word-break:break-all}
+.leg{font-size:12.5px;color:var(--accent);margin-top:2px}
+.acts{display:flex;gap:6px;flex:none;align-items:center}
+.ib{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:9px;height:34px;min-width:34px;
+  padding:0 9px;font:inherit;font-size:13px;font-weight:600}
+.ib.del{color:var(--danger);font-size:18px;line-height:1;padding:0}
+.ib.go{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.summary{display:flex;gap:16px;font-size:14px;margin-bottom:6px}
+.summary b{font-size:18px}
+.empty{color:var(--muted);font-size:14px;padding:6px 0}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom));z-index:20}
+.bar .wrap{display:flex;gap:8px;padding:0}
+.bar .btn{flex:1;padding:12px 0;font-size:15px}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  background:#1b1f1d;color:#fff;padding:9px 14px;border-radius:10px;font-size:14px;z-index:30;
+  display:none;align-items:center;gap:12px;max-width:92vw;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+.toast.show{display:flex}
+.toast a{color:#5eead4;font-weight:700;text-decoration:none}
+.progress{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:8px;display:none}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.mk{background:var(--accent);color:var(--accent-ink);border:2px solid #fff;border-radius:50%;width:26px;height:26px;
+  display:flex;align-items:center;justify-content:center;font:700 13px/1 sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.mk.start{background:#1b1f1d;color:#fff;width:30px;height:30px}
+.mk.pend{background:#6b726e;color:#fff}
+#startAddr{display:none}
+</style>
+<script>
+window._AMapSecurityConfig = { securityJsCode: '08a9d7aa98b4ae4141ca55e0ad0f14b4' };
+</script>
+<script src="https://webapi.amap.com/maps?v=2.0&key=f89416b05ea87bdaa258d2af7359e34d&plugin=AMap.Geocoder,AMap.PlaceSearch,AMap.Driving,AMap.Walking,AMap.Geolocation"></script>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>出行设置</h2>
+    <div class="row">
+      <div class="seg" id="modeSeg">
+        <button data-v="car">🚗 驾车</button>
+        <button data-v="walk">🚶 步行</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="seg" id="startSeg">
+        <button data-v="me">从我的位置出发</button>
+        <button data-v="addr">指定起点</button>
+      </div>
+    </div>
+    <div class="row"><input type="text" id="startAddr" placeholder="起点地址，例如：南京大学仙林校区"></div>
+    <div class="row">
+      <input type="text" id="city" placeholder="所在城市（可选，填了解析更准）" style="flex:1">
+      <label class="chk"><input type="checkbox" id="round"> 回到起点</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>添加地址</h2>
+    <textarea id="input" placeholder="粘贴地址，每行一个（也可用分号隔开）&#10;例如：&#10;新街口德基广场&#10;南京南站&#10;玄武湖公园"></textarea>
+    <div class="row" style="justify-content:space-between">
+      <span class="small" id="addHint">最多 15 个地址</span>
+      <button class="btn primary" id="addBtn">解析并添加</button>
+    </div>
+    <div class="progress" id="prog"><i></i></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:6px">
+      <h2 style="margin:0" id="listTitle">地址列表</h2>
+      <button class="btn ghost" id="clearBtn" style="padding:4px 10px;font-size:13px">清空</button>
+    </div>
+    <div id="summary"></div>
+    <ul class="list" id="list"></ul>
+  </div>
+  <p class="small" style="text-align:center;margin:14px 0 0">驾车：一键把全部途经点交给高德；步行：高德不支持途经点，按顺序逐站导航。</p>
+</div>
+
+<div class="bar"><div class="wrap">
+  <button class="btn" id="calcBtn">计算最优路线</button>
+  <button class="btn primary" id="navBtn" disabled>开始导航</button>
+</div></div>
+
+<div class="toast" id="toast"><span id="toastMsg"></span><a href="#" id="toastAct"></a></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ---------- 存储（失败也不影响使用） ---------- */
+const LS_STATE='mnav.state.v1', LS_CACHE='mnav.cache.v1';
+function load(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+
+const S=Object.assign({
+  mode:'car', startType:'me', startText:'', city:'', round:false,
+  stops:[],          // {id,raw,name,addr,lng,lat,coarse}
+  order:null,        // 优化后的 id 顺序
+  legs:null,         // 与 order 对应：从上一点到该点的 {d,t,est}
+  backLeg:null,      // 回到起点的一段
+  origin:null,       // 原始起点 {lng,lat,name}
+  cur:null           // 当前出发点（到达某站后更新）
+}, load(LS_STATE,{}));
+let cache=load(LS_CACHE,{});
+function persist(){save(LS_STATE,S)}
+function persistCache(){
+  const keys=Object.keys(cache); if(keys.length>3000){keys.slice(0,keys.length-2000).forEach(k=>delete cache[k])}
+  save(LS_CACHE,cache);
+}
+
+/* ---------- 工具 ---------- */
+const $=s=>document.querySelector(s);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const ck=p=>p.lng.toFixed(5)+','+p.lat.toFixed(5);
+function fmtD(m){return m>=1000?(m/1000).toFixed(m>=10000?0:1)+' 公里':Math.round(m)+' 米'}
+function fmtT(s){s=Math.round(s/60);if(s<60)return s+' 分钟';return Math.floor(s/60)+' 小时'+(s%60?(' '+s%60+' 分'):'')}
+function hav(a,b){const R=6371000,toR=x=>x*Math.PI/180;const dLa=toR(b.lat-a.lat),dLo=toR(b.lng-a.lng);
+  const h=Math.sin(dLa/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+let toastTimer;
+function toast(msg,actText,act,ms){
+  $('#toastMsg').textContent=msg; const a=$('#toastAct');
+  if(actText){a.textContent=actText;a.style.display='';a.onclick=e=>{e.preventDefault();hideToast();act&&act()}}else a.style.display='none';
+  $('#toast').classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(hideToast,ms||3500);
+}
+function hideToast(){$('#toast').classList.remove('show')}
+function progress(f){const p=$('#prog');if(f==null){p.style.display='none';return}p.style.display='block';p.firstElementChild.style.width=(f*100)+'%'}
+
+if(!window.AMap){
+  document.body.insertAdjacentHTML('afterbegin','<div style="padding:16px;color:#c2410c">高德地图脚本加载失败，请检查网络或 Key 配置。</div>');
+  return;
+}
+
+/* ---------- 地图 ---------- */
+const dark=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
+const map=new AMap.Map('map',{zoom:11,resizeEnable:true,mapStyle:dark?'amap://styles/dark':'amap://styles/normal'});
+let overlays=[];
+function clearMap(){if(overlays.length)map.remove(overlays);overlays=[]}
+function addMarker(p,label,cls,title){
+  const m=new AMap.Marker({position:[p.lng,p.lat],content:'<div class="mk '+(cls||'')+'">'+esc(label)+'</div>',
+    offset:new AMap.Pixel(-13,-13),title:title||''});
+  overlays.push(m);map.add(m);
+}
+function drawMap(paths){
+  clearMap();
+  const start=S.cur||S.origin; if(start) addMarker(start,'起','start','起点');
+  if(S.order){
+    S.order.forEach((id,i)=>{const s=byId(id);if(s)addMarker(s,String(i+1),'',s.name)});
+  }else{
+    S.stops.forEach(s=>addMarker(s,'·','pend',s.name));
+  }
+  (paths||[]).forEach(path=>{
+    if(!path||path.length<2)return;
+    const pl=new AMap.Polyline({path,strokeColor:dark?'#2dd4bf':'#0f766e',strokeWeight:6,strokeOpacity:.85,lineJoin:'round',showDir:true});
+    overlays.push(pl);map.add(pl);
+  });
+  if(overlays.length)map.setFitView(overlays,false,[40,40,40,40]);
+}
+
+/* ---------- 定位 / 地理编码 ---------- */
+function locate(){
+  return new Promise((res,rej)=>{
+    const g=new AMap.Geolocation({enableHighAccuracy:true,timeout:10000,needAddress:false});
+    g.getCurrentPosition((st,r)=>{
+      if(st==='complete'&&r.position)res({lng:r.position.lng,lat:r.position.lat,name:'我的位置'});
+      else rej(new Error((r&&r.message)||'定位失败'));
+    });
+  });
+}
+const COARSE=['国家','省','市','区县','开发区','乡镇','村庄','热点商圈','未知'];
+function geocode(text){
+  return new Promise(res=>{
+    const city=S.city.trim();
+    const gc=new AMap.Geocoder({city:city||''});
+    gc.getLocation(text,(st,r)=>{
+      const g=(st==='complete'&&r.geocodes&&r.geocodes.length)?r.geocodes[0]:null;
+      if(g&&!COARSE.includes(g.level)){
+        return res({name:text,addr:g.formattedAddress,lng:g.location.lng,lat:g.location.lat,coarse:false});
+      }
+      // 不够精确时用 POI 搜索再试一次（对店名、景点名更准）
+      const ps=new AMap.PlaceSearch({city:city||'全国',citylimit:!!city,pageSize:1,pageIndex:1,extensions:'base'});
+      ps.search(text,(s2,r2)=>{
+        const p=(s2==='complete'&&r2.poiList&&r2.poiList.pois&&r2.poiList.pois.length)?r2.poiList.pois[0]:null;
+        if(p&&p.location){
+          return res({name:p.name||text,addr:[p.cityname,p.adname,p.address].filter(x=>x&&typeof x==='string').join(''),
+            lng:p.location.lng,lat:p.location.lat,coarse:false});
+        }
+        if(g)return res({name:text,addr:g.formattedAddress+'（仅定位到'+g.level+'）',lng:g.location.lng,lat:g.location.lat,coarse:true});
+        res(null);
+      });
+    });
+  });
+}
+
+/* ---------- 路线 / 距离矩阵 ---------- */
+function route(a,b,mode,withPath){
+  return new Promise(res=>{
+    const svc=mode==='car'
+      ?new AMap.Driving({policy:AMap.DrivingPolicy.LEAST_TIME,hideMarkers:true})
+      :new AMap.Walking({hideMarkers:true});
+    let done=false;const t=setTimeout(()=>{if(!done){done=true;res(null)}},12000);
+    svc.search(new AMap.LngLat(a.lng,a.lat),new AMap.LngLat(b.lng,b.lat),(st,r)=>{
+      if(done)return;done=true;clearTimeout(t);
+      if(st==='complete'&&r.routes&&r.routes.length){
+        const rt=r.routes[0];let path=null;
+        if(withPath){path=[];(rt.steps||[]).forEach(s=>(s.path||[]).forEach(p=>path.push([p.lng,p.lat])))}
+        res({d:rt.distance,t:rt.time,path});
+      }else res(null);
+    });
+  });
+}
+function estimate(a,b,mode){const d=hav(a,b)*1.35;return{d,t:mode==='car'?d/(28/3.6)+60:d/1.25,est:true}}
+async function leg(a,b,mode){
+  if(ck(a)===ck(b))return{d:0,t:0};
+  const k=mode+'|'+ck(a)+'|'+ck(b), k2=mode+'|'+ck(b)+'|'+ck(a);
+  if(cache[k])return cache[k]; if(cache[k2])return cache[k2];
+  let r=await route(a,b,mode,false);
+  if(!r){await sleep(700);r=await route(a,b,mode,false)}
+  const v=r?{d:r.d,t:r.t}:estimate(a,b,mode);
+  if(r)cache[k]=v;
+  return v;
+}
+// 计算所有点两两之间的耗时（对称处理，结果缓存，删除地址后无需重算）
+async function matrix(points,mode){
+  const n=points.length,C=Array.from({length:n},()=>new Array(n).fill(0)),D=Array.from({length:n},()=>new Array(n).fill(0)),E=Array.from({length:n},()=>new Array(n).fill(false));
+  const jobs=[];for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)jobs.push([i,j]);
+  let k=0,done=0;
+  async function worker(){
+    while(k<jobs.length){
+      const [i,j]=jobs[k++];
+      const cached=cache[mode+'|'+ck(points[i])+'|'+ck(points[j])]||cache[mode+'|'+ck(points[j])+'|'+ck(points[i])];
+      const v=await leg(points[i],points[j],mode);
+      C[i][j]=C[j][i]=v.t;D[i][j]=D[j][i]=v.d;E[i][j]=E[j][i]=!!v.est;
+      done++;progress(done/jobs.length);
+      if(!cached)await sleep(120);
+    }
+  }
+  progress(0);
+  await Promise.all([worker(),worker(),worker()]);
+  progress(null);persistCache();
+  return{C,D,E};
+}
+// Held-Karp 动态规划：精确最优顺序。s=起点下标，r=终点下标（-1 表示不回）
+function solve(C,stopIdx,s,r){
+  const N=stopIdx.length;if(N===0)return[];
+  const FULL=1<<N,dp=new Float64Array(FULL*N).fill(Infinity),par=new Int16Array(FULL*N).fill(-1);
+  for(let j=0;j<N;j++)dp[(1<<j)*N+j]=C[s][stopIdx[j]];
+  for(let m=1;m<FULL;m++)for(let j=0;j<N;j++){
+    if(!(m&(1<<j)))continue;const v=dp[m*N+j];if(v===Infinity)continue;
+    for(let q=0;q<N;q++){if(m&(1<<q))continue;const nm=m|(1<<q),nv=v+C[stopIdx[j]][stopIdx[q]];
+      if(nv<dp[nm*N+q]){dp[nm*N+q]=nv;par[nm*N+q]=j}}
+  }
+  let best=Infinity,last=-1;const M=FULL-1;
+  for(let j=0;j<N;j++){const v=dp[M*N+j]+(r>=0?C[stopIdx[j]][r]:0);if(v<best){best=v;last=j}}
+  const out=[];let mm=M,j=last;while(j!==-1){out.push(j);const pj=par[mm*N+j];mm^=(1<<j);j=pj}
+  return out.reverse();
+}
+
+/* ---------- 核心流程 ---------- */
+const byId=id=>S.stops.find(s=>s.id===id);
+let busy=false;
+function setBusy(b,label){busy=b;$('#calcBtn').disabled=b;$('#addBtn').disabled=b;if(label)$('#calcBtn').textContent=label;render()}
+
+async function resolveStart(){
+  if(S.startType==='me'){
+    try{const p=await locate();S.cur=p;if(!S.origin)S.origin=p;}
+    catch(e){
+      if(S.cur){toast('定位失败，沿用上一次的位置');return true}
+      toast('定位失败：'+e.message+'。可改用“指定起点”',null,null,5000);return false;
+    }
+  }else{
+    const t=S.startText.trim();if(!t){toast('请填写起点地址');return false}
+    if(!S.origin||S.origin.name!==t){
+      const g=await geocode(t);if(!g){toast('起点地址解析失败');return false}
+      S.origin={lng:g.lng,lat:g.lat,name:t};S.cur=S.origin;
+    }
+    if(!S.cur)S.cur=S.origin;
+  }
+  return true;
+}
+
+async function optimize(){
+  if(busy)return;
+  if(!S.stops.length){toast('先添加地址');return}
+  setBusy(true,'定位中…');
+  try{
+    if(!(await resolveStart()))return;
+    $('#calcBtn').textContent='计算路线中…';
+    const pts=[S.cur,...S.stops];let r=-1;
+    if(S.round&&S.origin&&ck(S.origin)!==ck(S.cur)){pts.push(S.origin);r=pts.length-1}
+    else if(S.round)r=0;
+    const {C,D,E}=await matrix(pts,S.mode);
+    const stopIdx=S.stops.map((_,i)=>i+1);
+    const ord=solve(C,stopIdx,0,r);
+    S.order=ord.map(j=>S.stops[j].id);
+    S.legs=[];let prev=0;
+    ord.forEach(j=>{const ix=stopIdx[j];S.legs.push({d:D[prev][ix],t:C[prev][ix],est:E[prev][ix]});prev=ix});
+    S.backLeg=r>=0?{d:D[prev][r],t:C[prev][r],est:E[prev][r]}:null;
+    persist();render();
+    await drawRoute();
+  }finally{setBusy(false,S.order?'重新计算':'计算最优路线')}
+}
+
+// 地图上画出真实路线
+let drawToken=0;
+async function drawRoute(){
+  const my=++drawToken;
+  if(!S.order){drawMap();return}
+  drawMap();
+  const seq=[S.cur,...S.order.map(byId)];
+  if(S.round&&S.origin)seq.push(S.origin);
+  const paths=[];
+  for(let i=0;i<seq.length-1;i++){
+    if(my!==drawToken)return;
+    const r=await route(seq[i],seq[i+1],S.mode,true);
+    paths.push(r&&r.path?r.path:[[seq[i].lng,seq[i].lat],[seq[i+1].lng,seq[i+1].lat]]);
+    if(my===drawToken)drawMap(paths);
+  }
+}
+
+async function addFromInput(){
+  if(busy)return;
+  const lines=$('#input').value.split(/[\n;；]+/).map(s=>s.replace(/^\s*(\d+[.、)）\s]|[①-⑳]|[-*•·])\s*/,'').trim()).filter(Boolean);
+  if(!lines.length){toast('请先粘贴地址');return}
+  const room=15-S.stops.length;
+  if(room<=0){toast('最多 15 个地址');return}
+  const todo=lines.slice(0,room);
+  setBusy(true);progress(0);
+  const failed=[];
+  for(let i=0;i<todo.length;i++){
+    const g=await geocode(todo[i]);
+    if(g)S.stops.push(Object.assign({id:uid(),raw:todo[i]},g));else failed.push(todo[i]);
+    progress((i+1)/todo.length);await sleep(150);
+  }
+  progress(null);
+  $('#input').value=failed.join('\n');
+  invalidate();persist();setBusy(false);drawMap();
+  const ok=todo.length-failed.length;
+  let msg='已添加 '+ok+' 个地址';
+  if(failed.length)msg+='，'+failed.length+' 个没找到（留在输入框里了，可改写后重试）';
+  if(lines.length>todo.length)msg+='；超出 15 个的未添加';
+  toast(msg,null,null,5000);
+}
+
+function invalidate(){S.order=null;S.legs=null;S.backLeg=null}
+
+// 删除：已有路线时用缓存瞬间重排，不额外消耗接口
+let lastDeleted=null;
+async function removeStop(id,arrived){
+  const idx=S.stops.findIndex(s=>s.id===id);if(idx<0)return;
+  const snapshot=JSON.parse(JSON.stringify(S));
+  const s=S.stops[idx];
+  S.stops.splice(idx,1);
+  if(arrived)S.cur={lng:s.lng,lat:s.lat,name:s.name};
+  lastDeleted=snapshot;
+  if(S.order&&S.stops.length){
+    if(arrived&&S.order[0]===id){
+      // 按最优顺序到达第一站：剩余顺序依然最优，直接沿用
+      S.order.shift();S.legs.shift();
+      persist();render();drawRoute();
+    }else{
+      const oi=S.order.indexOf(id);if(oi>=0){S.order.splice(oi,1);S.legs.splice(oi,1)}
+      persist();render();
+      await reoptimizeCached();
+    }
+  }else{invalidate();persist();render();drawMap()}
+  toast(arrived?('已到达「'+s.name+'」'):('已删除「'+s.name+'」'),'撤销',undo,5000);
+}
+async function reoptimizeCached(){
+  if(busy)return;setBusy(true,'重新排序…');
+  try{
+    const pts=[S.cur,...S.stops];let r=-1;
+    if(S.round&&S.origin&&ck(S.origin)!==ck(S.cur)){pts.push(S.origin);r=pts.length-1}else if(S.round)r=0;
+    const {C,D,E}=await matrix(pts,S.mode);
+    const stopIdx=S.stops.map((_,i)=>i+1),ord=solve(C,stopIdx,0,r);
+    S.order=ord.map(j=>S.stops[j].id);S.legs=[];let prev=0;
+    ord.forEach(j=>{const ix=stopIdx[j];S.legs.push({d:D[prev][ix],t:C[prev][ix],est:E[prev][ix]});prev=ix});
+    S.backLeg=r>=0?{d:D[prev][r],t:C[prev][r],est:E[prev][r]}:null;
+    persist();render();drawRoute();
+  }finally{setBusy(false,'重新计算')}
+}
+function undo(){if(!lastDeleted)return;Object.assign(S,lastDeleted);lastDeleted=null;persist();render();S.order?drawRoute():drawMap()}
+
+/* ---------- 导航跳转 ---------- */
+const UA=navigator.userAgent,isIOS=/iPhone|iPad|iPod/i.test(UA)||(/Macintosh/.test(UA)&&'ontouchend' in document),isAndroid=/Android/i.test(UA);
+function navOne(p){
+  const url='https://uri.amap.com/navigation?to='+p.lng+','+p.lat+','+encodeURIComponent(p.name)+
+    '&mode='+(S.mode==='car'?'car':'walk')+'&policy=1&src=mnav&coordinate=gaode&callnative=1';
+  location.href=url;
+}
+function navAll(){
+  const stops=(S.order||[]).map(byId).filter(Boolean);if(!stops.length)return;
+  if(S.mode==='walk'){navOne(stops[0]);return}
+  if(!isIOS&&!isAndroid){navOne(stops[0]);toast('电脑上只能逐站打开网页版，手机上会一键带上全部途经点');return}
+  let dest,vias;
+  if(S.round&&S.origin){dest=S.origin;vias=stops}else{dest=stops[stops.length-1];vias=stops.slice(0,-1)}
+  vias=vias.slice(0,16);
+  const q=[];
+  const fromMe=S.startType==='me'&&S.cur&&S.cur.name==='我的位置';
+  if(!fromMe&&S.cur){q.push('slat='+S.cur.lat,'slon='+S.cur.lng,'sname='+encodeURIComponent(S.cur.name||'起点'))}
+  q.push('dlat='+dest.lat,'dlon='+dest.lng,'dname='+encodeURIComponent(dest.name||'终点'),'dev=0','t=0');
+  if(vias.length){
+    q.push('vian='+vias.length,
+      'vialons='+vias.map(v=>v.lng).join('|'),
+      'vialats='+vias.map(v=>v.lat).join('|'),
+      'vianames='+vias.map(v=>encodeURIComponent(v.name)).join('|'));
+  }
+  const url=(isIOS?'iosamap://path?sourceApplication=mnav&':'amapuri://route/plan/?sourceApplication=mnav&')+q.join('&');
+  const t0=Date.now();
+  location.href=url;
+  setTimeout(()=>{if(!document.hidden&&Date.now()-t0<2600)toast('没有打开高德地图？可点各站右侧的“导航”逐站前往',null,null,5000)},2000);
+}
+
+/* ---------- 渲染 ---------- */
+function render(){
+  document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===S.mode));
+  document.querySelectorAll('#startSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===S.startType));
+  $('#startAddr').style.display=S.startType==='addr'?'block':'none';
+  if(document.activeElement!==$('#startAddr'))$('#startAddr').value=S.startText;
+  if(document.activeElement!==$('#city'))$('#city').value=S.city;
+  $('#round').checked=S.round;
+  $('#addHint').textContent='已有 '+S.stops.length+' / 15 个';
+
+  const ul=$('#list'),sum=$('#summary');
+  if(!S.stops.length){ul.innerHTML='<li class="empty">还没有地址。粘贴后点“解析并添加”。</li>';sum.innerHTML='';}
+  else if(S.order){
+    $('#listTitle').textContent='最优顺序';
+    const tt=S.legs.reduce((a,l)=>a+l.t,0)+(S.backLeg?S.backLeg.t:0),dd=S.legs.reduce((a,l)=>a+l.d,0)+(S.backLeg?S.backLeg.d:0);
+    const est=S.legs.some(l=>l.est)||(S.backLeg&&S.backLeg.est);
+    sum.innerHTML='<div class="summary"><span>全程约 <b>'+fmtT(tt)+'</b></span><span><b>'+fmtD(dd)+'</b></span></div>'+
+      '<div class="small" style="margin-bottom:6px">'+(S.mode==='car'?'驾车':'步行')+' · 出发点：'+esc(S.cur?S.cur.name:'—')+(S.round?' · 回到起点':'')+(est?' · 部分路段为估算':'')+'</div>';
+    ul.innerHTML=S.order.map((id,i)=>{const s=byId(id),l=S.legs[i]||{};return s?li(s,i+1,l,i===0):''}).join('')+
+      (S.backLeg?'<li class="item"><div class="num">↩</div><div class="body"><div class="name">回到起点</div><div class="leg">'+fmtD(S.backLeg.d)+' · '+fmtT(S.backLeg.t)+'</div></div></li>':'');
+  }else{
+    $('#listTitle').textContent='地址列表';sum.innerHTML='';
+    ul.innerHTML=S.stops.map((s,i)=>li(s,'·',null,false)).join('');
+  }
+  if(!S.stops.length)$('#listTitle').textContent='地址列表';
+  $('#navBtn').disabled=!S.order||!S.order.length||busy;
+  $('#navBtn').textContent=S.mode==='car'?'一键导航全程':'导航去下一站';
+  if(!busy)$('#calcBtn').textContent=S.order?'重新计算':'计算最优路线';
+}
+function li(s,n,l,first){
+  const bad=s.coarse;
+  return '<li class="item" data-id="'+s.id+'"><div class="num'+(bad?' bad':'')+'">'+n+'</div>'+
+    '<div class="body"><div class="name">'+esc(s.name)+'</div><div class="addr">'+esc(s.addr||'')+'</div>'+
+    (l?'<div class="leg">'+(first?'从出发点 ':'距上一站 ')+fmtD(l.d)+' · '+fmtT(l.t)+(l.est?'（估）':'')+'</div>':'')+
+    (bad?'<div class="addr" style="color:var(--warn)">位置可能不准，建议删掉后写得更具体些</div>':'')+
+    '</div><div class="acts">'+
+    (l?'<button class="ib go" data-act="nav">导航</button>':'')+
+    (l&&first?'<button class="ib" data-act="arrive" title="到达后从列表移除">到达</button>':'')+
+    '<button class="ib del" data-act="del" title="删除">×</button></div></li>';
+}
+
+/* ---------- 事件 ---------- */
+$('#modeSeg').onclick=e=>{const v=e.target.dataset.v;if(!v||v===S.mode)return;S.mode=v;
+  const had=!!S.order;persist();render();if(had&&S.stops.length){invalidate();optimize()}};
+$('#startSeg').onclick=e=>{const v=e.target.dataset.v;if(!v||v===S.startType)return;S.startType=v;S.origin=null;S.cur=null;invalidate();persist();render();drawMap()};
+$('#startAddr').onchange=e=>{S.startText=e.target.value;S.origin=null;S.cur=null;invalidate();persist();render();drawMap()};
+$('#city').onchange=e=>{S.city=e.target.value.trim();persist()};
+$('#round').onchange=e=>{S.round=e.target.checked;persist();if(S.order)reoptimizeCached()};
+$('#addBtn').onclick=addFromInput;
+$('#calcBtn').onclick=optimize;
+$('#navBtn').onclick=navAll;
+$('#clearBtn').onclick=()=>{if(!S.stops.length)return;lastDeleted=JSON.parse(JSON.stringify(S));
+  S.stops=[];invalidate();S.origin=null;S.cur=null;persist();render();drawMap();toast('已清空','撤销',undo,5000)};
+$('#list').onclick=e=>{
+  const b=e.target.closest('button[data-act]');if(!b||busy)return;
+  const id=b.closest('.item').dataset.id,act=b.dataset.act;
+  if(act==='del')removeStop(id,false);
+  else if(act==='arrive')removeStop(id,true);
+  else if(act==='nav'){const s=byId(id);if(s)navOne(s)}
+};
+
+render();
+S.order?drawRoute():drawMap();
+})();
+</script>
+</body>
+</html>
