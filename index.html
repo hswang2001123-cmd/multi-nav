@@ -29,7 +29,7 @@ h2{font-size:13px;font-weight:600;color:var(--muted);margin:0 0 10px;letter-spac
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .row + .row{margin-top:10px}
 .seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;flex:1}
-.seg button{flex:1;border:0;background:transparent;color:var(--muted);padding:8px 0;border-radius:8px;font-size:14px;font-weight:600}
+.seg button{flex:1;white-space:nowrap;border:0;background:transparent;color:var(--muted);padding:8px 0;border-radius:8px;font-size:14px;font-weight:600}
 .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 label.chk{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--ink)}
 input[type=text],textarea{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);
@@ -88,9 +88,14 @@ a{color:var(--accent)}
 .sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:40;display:none;align-items:flex-end;justify-content:center}
 .sheet.show{display:flex}
 .sheet-card{background:var(--card);width:100%;max-width:640px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
-.sheet-card .btn{display:block;text-align:center;text-decoration:none;padding:12px 0}
+.sheet-card .btn{display:block;text-align:center;text-decoration:none;padding:12px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sheet-title{font-size:17px;font-weight:700}
 .banner{background:#fdf0dc;color:#7c4a03;padding:10px 14px;font-size:13.5px;line-height:1.45}
+.dragcol{flex:none;display:flex;flex-direction:column;align-items:center;gap:3px;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;padding:2px 4px 6px;margin:-2px -4px 0}
+.grip{color:var(--muted);font-size:15px;line-height:1}
+.item.dragging{position:fixed;z-index:50;background:var(--card);box-shadow:0 10px 28px rgba(0,0,0,.28);border-radius:12px;padding:10px 8px;border-top:0;margin:0;cursor:grabbing}
+.item.ph{border:2px dashed var(--accent);border-radius:12px;background:var(--accent-soft);opacity:.6}
+.item.ph + .item{border-top:0}
 .raw{font-size:12px;color:var(--muted);margin-top:2px;word-break:break-all}
 .body.editable{cursor:pointer}
 .edit-ico{font-size:12px;color:var(--muted);margin-left:4px;font-weight:400}
@@ -121,10 +126,16 @@ body.nokey .welcome{display:block}
       </div>
     </div>
     <div class="row"><input type="text" id="startAddr" placeholder="起点地址，例如：南京大学仙林校区"></div>
-    <div class="row">
-      <input type="text" id="city" placeholder="所在城市（可选，填了解析更准）" style="flex:1">
-      <label class="chk"><input type="checkbox" id="round"> 回到起点</label>
+    <div class="row" style="flex-wrap:nowrap">
+      <span class="small" style="flex:none;width:30px">终点</span>
+      <div class="seg" id="endSeg">
+        <button data-v="none">最后一站</button>
+        <button data-v="start">回到起点</button>
+        <button data-v="addr">指定终点</button>
+      </div>
     </div>
+    <div class="row"><input type="text" id="endAddr" placeholder="终点地址，例如：家或公司的地址" style="display:none"></div>
+    <div class="row"><input type="text" id="city" placeholder="所在城市（可选，填了解析更准）"></div>
   </div>
 
   <div class="card">
@@ -192,7 +203,10 @@ function load(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
 
 const S=Object.assign({
-  mode:'car', startType:'me', startText:'', city:'', round:false,
+  mode:'car', startType:'me', startText:'', city:'',
+  endType:'none',    // none=最后一站结束 start=回到起点 addr=指定终点
+  endText:'', endPos:null,
+  manual:false,      // 顺序是否被手动拖动过
   stops:[],          // {id,raw,name,addr,lng,lat,coarse}
   order:null,        // 优化后的 id 顺序
   legs:null,         // 与 order 对应：从上一点到该点的 {d,t,est}
@@ -200,6 +214,7 @@ const S=Object.assign({
   origin:null,       // 原始起点 {lng,lat,name}
   cur:null           // 当前出发点（到达某站后更新）
 }, load(LS_STATE,{}));
+if(S.round===true&&S.endType==='none')S.endType='start'; delete S.round; // 兼容旧版
 let cache=load(LS_CACHE,{});
 function persist(){save(LS_STATE,S)}
 function persistCache(){
@@ -244,6 +259,7 @@ function addMarker(p,label,cls,title){
 function drawMap(paths){
   clearMap();
   const start=S.cur||S.origin; if(start) addMarker(start,'起','start','起点');
+  if(S.endType==='addr'&&S.endPos) addMarker(S.endPos,'终','start','终点');
   if(S.order){
     S.order.forEach((id,i)=>{const s=byId(id);if(s)addMarker(s,String(i+1),'',s.name)});
   }else{
@@ -275,9 +291,10 @@ function extractAddress(line){
   // 电话、手机号、座机、订单号等长数字
   t=t.replace(/(\+?86[-\s]?)?1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}/g,' ')
      .replace(/\(?0\d{2,3}\)?[-\s]?\d{7,8}(-\d{1,4})?/g,' ')
-     .replace(/\d{11,}/g,' ');
+     .replace(/\d{11,}/g,' ')
+     .replace(/(^|[\s,，;；:：])\d{6}(?=$|[\s,，;；])/g,' '); // 邮编
   // 常见字段标签（含后面的冒号）
-  t=t.replace(/(收件人|收货人|联系人|姓名|名字|电话|手机号码|手机号|手机|联系电话|联系方式|微信号?|备注|留言|时间|送达时间|配送时间|订单号|单号|收货地址|详细地址|所在地区|所在地|地址)\s*[:：]/g,' ');
+  t=t.replace(/(收件人|收货人|联系人|姓名|名字|电话|手机号码|手机号|手机|联系电话|联系方式|微信号?|备注|留言|时间|送达时间|配送时间|订单号|单号|收货地址|详细地址|所在地区|所在地|省市区|地区|邮编|邮政编码|地址)\s*[:：]/g,' ');
   // 尾部常见备注：括号/【】中的“送/放/电话/备注…”说明
   t=t.replace(/[（(【\[][^）)】\]]*(送|放|电话|备注|联系|请|勿|时间|签收|代收)[^）)】\]]*[）)】\]]/g,' ');
   const toks=t.split(/[\s,，;；|｜\/\t:：、]+/).map(x=>x.trim()).filter(Boolean);
@@ -298,6 +315,38 @@ function extractAddress(line){
     toks.forEach(x=>{if(/[\u4e00-\u9fa5]/.test(x)&&!NOISE_KW.test(x)&&x.length>best.length)best=x});
   }
   return best||String(line).trim();
+}
+/* 把粘贴的文本切成“一条条地址记录”：
+   - 有“收货人/手机号码/所在地区/详细地址”这类标签时，把同一个人的几行合并成一条
+   - 没有标签时，空行分隔的块如果只有一行像地址，就整块合并；否则每行一条 */
+const FIELD_RE=/^\s*(?:\d+[.、)）]\s*)?(收件人|收货人|联系人|姓名|手机号码|手机号|手机|电话|联系电话|所在地区|所在地|地区|省市区|详细地址|收货地址|地址|邮编|邮政编码|备注)\s*[:：]/;
+const FIELD_KEY={收件人:'name',收货人:'name',联系人:'name',姓名:'name',手机号码:'phone',手机号:'phone',手机:'phone',电话:'phone',联系电话:'phone',
+  所在地区:'region',所在地:'region',地区:'region',省市区:'region',详细地址:'addr',收货地址:'addr',地址:'addr',邮编:'zip',邮政编码:'zip',备注:'note'};
+function looksAddr(l){const x=extractAddress(l);return x.length>=4&&ADDR_KW.test(x)}
+function splitRecords(text){
+  const lines=String(text).replace(/\r/g,'').split('\n');
+  const out=[];
+  if(lines.filter(l=>FIELD_RE.test(l)).length>=2){
+    let cur=[],seen=new Set();
+    const flush=()=>{if(cur.length)out.push(cur.join(' '));cur=[];seen=new Set()};
+    for(const raw of lines){
+      const l=raw.trim();
+      if(!l){flush();continue}
+      const m=l.match(FIELD_RE);
+      if(m){const k=FIELD_KEY[m[1]];if(seen.has(k))flush();seen.add(k);cur.push(l)}
+      else if(cur.length)cur.push(l);
+      else out.push(...l.split(/[;；]+/));
+    }
+    flush();
+  }else{
+    const blocks=String(text).replace(/\r/g,'').split(/\n\s*\n/).map(b=>b.trim()).filter(Boolean);
+    blocks.forEach(b=>{
+      const ls=b.split('\n').map(x=>x.trim()).filter(Boolean);
+      if(ls.length>1&&ls.filter(looksAddr).length<=1&&blocks.length>1)out.push(ls.join(' '));
+      else ls.forEach(l=>out.push(...l.split(/[;；]+/)));
+    });
+  }
+  return out.map(x=>x.replace(/^\s*(\d+[.、)）\s]|[①-⑳]|[-*•·])\s*/,'').trim()).filter(Boolean);
 }
 const COARSE=['国家','省','市','区县','开发区','乡镇','村庄','热点商圈','未知'];
 function geocode(text){
@@ -403,7 +452,7 @@ function solve(C,stopIdx,s,r){
 function reportErr(r){const info=typeof r==='string'?r:(r&&(r.info||r.message))||'';if(window.__keyProblem)window.__keyProblem(info)}
 const byId=id=>S.stops.find(s=>s.id===id);
 let busy=false;
-function setBusy(b,label){busy=b;$('#calcBtn').disabled=b;$('#addBtn').disabled=b;if(label)$('#calcBtn').textContent=label;render()}
+function setBusy(b,label){busy=b;$('#calcBtn').disabled=b;$('#addBtn').disabled=b;render();if(b&&label)$('#calcBtn').textContent=label}
 
 async function resolveStart(){
   if(S.startType==='me'){
@@ -423,26 +472,64 @@ async function resolveStart(){
   return true;
 }
 
+function endPoint(){
+  if(S.endType==='start')return S.origin;
+  if(S.endType==='addr')return S.endPos;
+  return null;
+}
+async function resolveEnd(){
+  if(S.endType!=='addr')return true;
+  const t=S.endText.trim();if(!t){toast('请填写终点地址');$('#endAddr').focus();return false}
+  if(!S.endPos||S.endPos.text!==t){
+    const g=await geocode(extractAddress(t));if(!g){toast('终点地址没找到，换个写法试试');return false}
+    S.endPos={lng:g.lng,lat:g.lat,name:g.name,text:t};
+  }
+  return true;
+}
+// 用距离矩阵求最优顺序（矩阵有缓存，重复计算不额外消耗接口）
+async function solveRoute(){
+  const end=endPoint();
+  const pts=[S.cur,...S.stops];let r=-1;
+  if(end){if(ck(end)===ck(S.cur))r=0;else{pts.push(end);r=pts.length-1}}
+  const {C,D,E}=await matrix(pts,S.mode);
+  const stopIdx=S.stops.map((_,i)=>i+1),ord=solve(C,stopIdx,0,r);
+  S.order=ord.map(j=>S.stops[j].id);S.legs=[];let prev=0;
+  ord.forEach(j=>{const ix=stopIdx[j];S.legs.push({d:D[prev][ix],t:C[prev][ix],est:E[prev][ix]});prev=ix});
+  S.backLeg=r>=0?{d:D[prev][r],t:C[prev][r],est:E[prev][r]}:null;
+  S.manual=false;
+}
 async function optimize(){
   if(busy)return;
   if(!S.stops.length){toast('先添加地址');return}
   setBusy(true,'定位中…');
   try{
     if(!(await resolveStart()))return;
+    if(!(await resolveEnd()))return;
     $('#calcBtn').textContent='计算路线中…';
-    const pts=[S.cur,...S.stops];let r=-1;
-    if(S.round&&S.origin&&ck(S.origin)!==ck(S.cur)){pts.push(S.origin);r=pts.length-1}
-    else if(S.round)r=0;
-    const {C,D,E}=await matrix(pts,S.mode);
-    const stopIdx=S.stops.map((_,i)=>i+1);
-    const ord=solve(C,stopIdx,0,r);
-    S.order=ord.map(j=>S.stops[j].id);
-    S.legs=[];let prev=0;
-    ord.forEach(j=>{const ix=stopIdx[j];S.legs.push({d:D[prev][ix],t:C[prev][ix],est:E[prev][ix]});prev=ix});
-    S.backLeg=r>=0?{d:D[prev][r],t:C[prev][r],est:E[prev][r]}:null;
+    await solveRoute();
     persist();render();
-    await drawRoute();
-  }finally{setBusy(false,S.order?'重新计算':'计算最优路线')}
+    drawRoute();
+  }finally{setBusy(false)}
+}
+// 按给定顺序（手动拖动后）计算各段距离
+async function applyOrder(ids){
+  if(busy)return;
+  setBusy(true,'计算中…');
+  try{
+    if(!S.cur&&!(await resolveStart()))return;
+    if(!(await resolveEnd()))return;
+    S.order=ids.filter(id=>byId(id));S.manual=true;
+    const seq=[S.cur,...S.order.map(byId)];const legs=[];
+    for(let i=1;i<seq.length;i++)legs.push(await leg(seq[i-1],seq[i],S.mode));
+    const end=endPoint();
+    S.legs=legs;S.backLeg=end?await leg(seq[seq.length-1],end,S.mode):null;
+    persistCache();persist();render();drawRoute();
+  }finally{setBusy(false)}
+}
+// 设置变化后重新算：手动顺序保持不变，否则重新求最优
+async function recompute(){
+  if(!S.order||!S.stops.length)return;
+  if(S.manual)await applyOrder(S.order);else await reoptimizeCached();
 }
 
 // 地图上画出真实路线
@@ -452,7 +539,7 @@ async function drawRoute(){
   if(!S.order){drawMap();return}
   drawMap();
   const seq=[S.cur,...S.order.map(byId)];
-  if(S.round&&S.origin)seq.push(S.origin);
+  const endP=endPoint();if(endP)seq.push(endP);
   const paths=[];
   for(let i=0;i<seq.length-1;i++){
     if(my!==drawToken)return;
@@ -464,7 +551,7 @@ async function drawRoute(){
 
 async function addFromInput(){
   if(busy)return;
-  const lines=$('#input').value.split(/[\n;；]+/).map(s=>s.replace(/^\s*(\d+[.、)）\s]|[①-⑳]|[-*•·])\s*/,'').trim()).filter(Boolean);
+  const lines=splitRecords($('#input').value);
   if(!lines.length){toast('请先粘贴地址');return}
   const room=15-S.stops.length;
   if(room<=0){toast('最多 15 个地址');return}
@@ -506,7 +593,7 @@ async function removeStop(id,arrived){
     }else{
       const oi=S.order.indexOf(id);if(oi>=0){S.order.splice(oi,1);S.legs.splice(oi,1)}
       persist();render();
-      await reoptimizeCached();
+      await recompute();
     }
   }else{invalidate();persist();render();drawMap()}
   toast(arrived?('已到达「'+s.name+'」'):('已删除「'+s.name+'」'),'撤销',undo,5000);
@@ -514,15 +601,11 @@ async function removeStop(id,arrived){
 async function reoptimizeCached(){
   if(busy)return;setBusy(true,'重新排序…');
   try{
-    const pts=[S.cur,...S.stops];let r=-1;
-    if(S.round&&S.origin&&ck(S.origin)!==ck(S.cur)){pts.push(S.origin);r=pts.length-1}else if(S.round)r=0;
-    const {C,D,E}=await matrix(pts,S.mode);
-    const stopIdx=S.stops.map((_,i)=>i+1),ord=solve(C,stopIdx,0,r);
-    S.order=ord.map(j=>S.stops[j].id);S.legs=[];let prev=0;
-    ord.forEach(j=>{const ix=stopIdx[j];S.legs.push({d:D[prev][ix],t:C[prev][ix],est:E[prev][ix]});prev=ix});
-    S.backLeg=r>=0?{d:D[prev][r],t:C[prev][r],est:E[prev][r]}:null;
+    if(!S.cur&&!(await resolveStart()))return;
+    if(!(await resolveEnd()))return;
+    await solveRoute();
     persist();render();drawRoute();
-  }finally{setBusy(false,'重新计算')}
+  }finally{setBusy(false)}
 }
 // 修改某个地址：重新识别并定位，已有路线则重新排序
 async function editStop(id){
@@ -535,7 +618,7 @@ async function editStop(id){
   if(!g){toast('没找到这个地址，换个写法试试');return}
   Object.assign(s,g,{raw:text,query:q});
   persist();render();
-  if(S.order)await reoptimizeCached();else drawMap();
+  if(S.order)await recompute();else drawMap();
   toast('已更新为「'+s.name+'」');
 }
 function undo(){if(!lastDeleted)return;Object.assign(S,lastDeleted);lastDeleted=null;persist();render();S.order?drawRoute():drawMap()}
@@ -556,7 +639,8 @@ function navAll(){
   if(S.mode==='walk'){navOne(stops[0]);return}
   if(!isIOS&&!isAndroid){navOne(stops[0]);toast('电脑上只能逐站打开网页版，手机上会一键带上全部途经点');return}
   let dest,vias;
-  if(S.round&&S.origin){dest=S.origin;vias=stops}else{dest=stops[stops.length-1];vias=stops.slice(0,-1)}
+  const endP=endPoint();
+  if(endP){dest=endP;vias=stops}else{dest=stops[stops.length-1];vias=stops.slice(0,-1)}
   vias=vias.slice(0,16);
   const q=[];
   const fromMe=S.startType==='me'&&S.cur&&S.cur.name==='我的位置';
@@ -600,31 +684,36 @@ function render(){
   $('#startAddr').style.display=S.startType==='addr'?'block':'none';
   if(document.activeElement!==$('#startAddr'))$('#startAddr').value=S.startText;
   if(document.activeElement!==$('#city'))$('#city').value=S.city;
-  $('#round').checked=S.round;
+  document.querySelectorAll('#endSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===S.endType));
+  $('#endAddr').style.display=S.endType==='addr'?'block':'none';
+  if(document.activeElement!==$('#endAddr'))$('#endAddr').value=S.endText;
   $('#addHint').textContent='已有 '+S.stops.length+' / 15 个';
 
   const ul=$('#list'),sum=$('#summary');
   if(!S.stops.length){ul.innerHTML='<li class="empty">还没有地址。粘贴后点“解析并添加”。</li>';sum.innerHTML='';}
   else if(S.order){
-    $('#listTitle').textContent='最优顺序';
+    $('#listTitle').textContent=S.manual?'自定义顺序':'最优顺序';
     const tt=S.legs.reduce((a,l)=>a+l.t,0)+(S.backLeg?S.backLeg.t:0),dd=S.legs.reduce((a,l)=>a+l.d,0)+(S.backLeg?S.backLeg.d:0);
     const est=S.legs.some(l=>l.est)||(S.backLeg&&S.backLeg.est);
     sum.innerHTML='<div class="summary"><span>全程约 <b>'+fmtT(tt)+'</b></span><span><b>'+fmtD(dd)+'</b></span></div>'+
-      '<div class="small" style="margin-bottom:6px">'+(S.mode==='car'?'驾车':'步行')+' · 出发点：'+esc(S.cur?S.cur.name:'—')+(S.round?' · 回到起点':'')+(est?' · 部分路段为估算':'')+'</div>';
+      '<div class="small" style="margin-bottom:6px">'+(S.mode==='car'?'驾车':'步行')+' · 出发点：'+esc(S.cur?S.cur.name:'—')+(S.endType==='start'?' · 回到起点':S.endType==='addr'&&S.endPos?' · 终点：'+esc(S.endPos.name):'')+(est?' · 部分路段为估算':'')+'</div>'+
+      (S.manual?'<div class="small" style="margin-bottom:6px;color:var(--warn)">已手动调整顺序，点“恢复最优”可重新按最快顺序排</div>':'')+
+      (S.order.length>1?'<div class="small" style="margin-bottom:4px">按住左侧序号上下拖动，可调整顺序</div>':'');
     ul.innerHTML=S.order.map((id,i)=>{const s=byId(id),l=S.legs[i]||{};return s?li(s,i+1,l,i===0):''}).join('')+
-      (S.backLeg?'<li class="item"><div class="num">↩</div><div class="body"><div class="name">回到起点</div><div class="leg">'+fmtD(S.backLeg.d)+' · '+fmtT(S.backLeg.t)+'</div></div></li>':'');
+      (S.backLeg?'<li class="item endrow"><div class="num">'+(S.endType==='start'?'↩':'终')+'</div><div class="body"><div class="name">'+(S.endType==='start'?'回到起点':'到达终点：'+esc(S.endPos?S.endPos.name:''))+'</div><div class="leg">'+fmtD(S.backLeg.d)+' · '+fmtT(S.backLeg.t)+'</div></div></li>':'');
   }else{
-    $('#listTitle').textContent='地址列表';sum.innerHTML='';
-    ul.innerHTML=S.stops.map((s,i)=>li(s,'·',null,false)).join('');
+    $('#listTitle').textContent='地址列表';
+    sum.innerHTML=S.stops.length>1?'<div class="small" style="margin-bottom:4px">点“计算最优路线”自动排序；也可以按住序号拖动，按你自己的顺序走</div>':'';
+    ul.innerHTML=S.stops.map((s,i)=>li(s,i+1,null,false)).join('');
   }
   if(!S.stops.length)$('#listTitle').textContent='地址列表';
   $('#navBtn').disabled=!S.order||!S.order.length||busy;
   $('#navBtn').textContent=S.mode==='car'?'一键导航全程':'导航去下一站';
-  if(!busy)$('#calcBtn').textContent=S.order?'重新计算':'计算最优路线';
+  if(!busy)$('#calcBtn').textContent=S.order?(S.manual?'恢复最优':'重新计算'):'计算最优路线';
 }
 function li(s,n,l,first){
   const bad=s.coarse;
-  return '<li class="item" data-id="'+s.id+'"><div class="num'+(bad?' bad':'')+'">'+n+'</div>'+
+  return '<li class="item" data-id="'+s.id+'"><div class="dragcol" title="按住拖动"><div class="num'+(bad?' bad':'')+'">'+n+'</div><div class="grip">≡</div></div>'+
     '<div class="body editable" data-act="edit"><div class="name">'+esc(s.name)+'<span class="edit-ico">✎</span></div><div class="addr">'+esc(s.addr||'')+'</div>'+
     (s.raw&&s.raw!==s.name&&s.raw!==s.query?'<div class="raw">原文：'+esc(s.raw.length>60?s.raw.slice(0,60)+'…':s.raw)+'</div>':'')+
     (l?'<div class="leg">'+(first?'从出发点 ':'距上一站 ')+fmtD(l.d)+' · '+fmtT(l.t)+(l.est?'（估）':'')+'</div>':'')+
@@ -641,7 +730,63 @@ $('#modeSeg').onclick=e=>{const v=e.target.dataset.v;if(!v||v===S.mode)return;S.
 $('#startSeg').onclick=e=>{const v=e.target.dataset.v;if(!v||v===S.startType)return;S.startType=v;S.origin=null;S.cur=null;invalidate();persist();render();drawMap()};
 $('#startAddr').onchange=e=>{S.startText=e.target.value;S.origin=null;S.cur=null;invalidate();persist();render();drawMap()};
 $('#city').onchange=e=>{S.city=e.target.value.trim();persist()};
-$('#round').onchange=e=>{S.round=e.target.checked;persist();if(S.order)reoptimizeCached()};
+$('#endSeg').onclick=async e=>{
+  const v=e.target.dataset.v;if(!v||v===S.endType||busy)return;
+  S.endType=v;persist();render();drawMap();
+  if(v==='addr'&&!S.endText.trim()){$('#endAddr').focus();return}
+  await recompute();
+};
+$('#endAddr').onchange=async e=>{S.endText=e.target.value;S.endPos=null;persist();if(S.order)await recompute();else render()};
+
+/* ---------- 拖动排序（手指/鼠标通用） ---------- */
+let drag=null;
+$('#list').addEventListener('pointerdown',e=>{
+  const h=e.target.closest('.dragcol');if(!h||busy||drag)return;
+  const item=h.closest('.item[data-id]');if(!item)return;
+  if($('#list').querySelectorAll('.item[data-id]').length<2)return;
+  e.preventDefault();
+  const r=item.getBoundingClientRect();
+  const ph=document.createElement('li');ph.className='item ph';ph.style.height=r.height+'px';
+  item.after(ph);
+  Object.assign(item.style,{width:r.width+'px',left:r.left+'px',top:r.top+'px'});
+  item.classList.add('dragging');
+  drag={item,ph,y0:e.clientY,top0:r.top,y:e.clientY,pid:e.pointerId,h};
+  try{h.setPointerCapture(e.pointerId)}catch(_){}
+  drag.timer=setInterval(autoScroll,16);
+  if(navigator.vibrate)try{navigator.vibrate(10)}catch(_){}
+});
+function placeAt(y){
+  const ul=$('#list');
+  const items=[...ul.querySelectorAll('.item[data-id]:not(.dragging)')];
+  let before=null;
+  for(const it of items){const b=it.getBoundingClientRect();if(y<b.top+b.height/2){before=it;break}}
+  if(before){if(drag.ph.nextSibling!==before)ul.insertBefore(drag.ph,before)}
+  else{const endRow=ul.querySelector('.endrow');if(endRow)ul.insertBefore(drag.ph,endRow);else ul.appendChild(drag.ph)}
+}
+function autoScroll(){
+  if(!drag)return;const edge=70,bottom=innerHeight-90;let dy=0;
+  if(drag.y<edge)dy=-Math.ceil((edge-drag.y)/6);else if(drag.y>bottom-edge)dy=Math.ceil((drag.y-(bottom-edge))/6);
+  if(dy){window.scrollBy(0,dy);placeAt(drag.y)}
+}
+document.addEventListener('pointermove',e=>{
+  if(!drag||e.pointerId!==drag.pid)return;
+  e.preventDefault();drag.y=e.clientY;
+  drag.item.style.top=(drag.top0+e.clientY-drag.y0)+'px';
+  placeAt(e.clientY);
+},{passive:false});
+function endDrag(e){
+  if(!drag||(e&&e.pointerId!==drag.pid))return;
+  const {item,ph}=drag;clearInterval(drag.timer);drag=null;
+  item.classList.remove('dragging');item.removeAttribute('style');
+  ph.replaceWith(item);
+  const ids=[...$('#list').querySelectorAll('.item[data-id]')].map(x=>x.dataset.id);
+  const old=S.order?S.order.slice():S.stops.map(s=>s.id);
+  if(ids.join()===old.join())return;
+  S.stops.sort((a,b)=>ids.indexOf(a.id)-ids.indexOf(b.id));
+  applyOrder(ids);
+}
+document.addEventListener('pointerup',endDrag);
+document.addEventListener('pointercancel',endDrag);
 $('#addBtn').onclick=addFromInput;
 $('#calcBtn').onclick=optimize;
 $('#navBtn').onclick=navAll;
